@@ -317,7 +317,8 @@ Stores:
 
 Gotchas: both `ToolReturn.return_value` and text `content` are reduced; `ModelRetry` and tool errors
 are never reduced. Keep `Shell(max_output_chars=...)` above your thresholds. `Summarize` usage counts
-toward the run; under durable execution prefer `Spill` for payloads near the engine's size limit.
+toward the run. Under durable execution spill writes and built-in summaries are journaled, so a
+replay reuses the recorded handle or summary; the payload is part of the operation input.
 Distinct from `ClampOversizedMessages`, which clamps model responses, not tool returns. With
 `CodeMode`, the limits apply to the `run_code` return, not to each tool call inside the script.
 
