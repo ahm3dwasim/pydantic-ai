@@ -609,7 +609,7 @@ makes no model requests. This does not increase the parent run's limits.
 Pass `model_settings` to give the dedicated summary call
 settings that differ from defaults carried by that model; the supplied settings merge over the model defaults
 without mutating the model or the settings dictionary. Pass `summarization_capabilities` to attach
-capabilities to the summary agent; capabilities on the outer agent do not run on the summary call.
+capabilities to the summary agent; capabilities on the outer agent do not run on the summary call. The default prompt asks for a concise summary, and an incremental update to rewrite the previous summary to its previous length rather than append to it. Set `max_summary_tokens` to also state a token budget in the prompt and cap the summary call's `max_tokens` (overriding `model_settings`); a summary that reaches the cap is cut off, so a small budget trades retention for size.
 
 The summary request is non-streaming unless `event_stream_handler` is set. Supply a handler to watch
 the summary as it is written, or pass `drain_summary_events` to take the streaming request path

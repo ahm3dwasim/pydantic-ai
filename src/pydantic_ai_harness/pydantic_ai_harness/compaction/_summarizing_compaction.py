@@ -105,8 +105,9 @@ The immediate actions still required to finish the task.
 ## Open questions
 Unresolved questions or blockers.
 
-Focus on results, not a replay of completed actions.  Respond ONLY with the summary -- no \
-preamble, no markdown fences.
+Focus on results, not a replay of completed actions.  Be concise: the summary must be \
+substantially shorter than the conversation it replaces, so keep each section to what is \
+needed to continue.  Respond ONLY with the summary -- no preamble, no markdown fences.
 
 <messages>
 {messages}
@@ -129,7 +130,8 @@ Summaries are now a `CompactionPart`; this only recognizes ones in histories sav
 _INCREMENTAL_UPDATE_INSTRUCTION = (
     'An anchored summary from earlier compaction is provided below in <previous-summary>. '
     'Update it using the conversation above: preserve still-true details, remove stale '
-    'details, and merge in new facts.  Keep the same section structure.'
+    'details, and merge in new facts.  Keep the same section structure, and rewrite the '
+    'summary to stay as short as it was: condense older details rather than appending to them.'
 )
 
 _HARNESS_DATA_INSTRUCTION = (
@@ -627,6 +629,15 @@ class SummarizingCompaction(AbstractCapability[AgentDepsT]):
     policy that differs from the running agent without mutating the model.
     """
 
+    max_summary_tokens: int | None = field(default=None, kw_only=True)
+    """Upper bound on the length of the summary, in tokens.
+
+    When set, the summary request tells the model to stay within this many tokens and sets
+    `max_tokens` on the summary call, overriding any `max_tokens` in `model_settings`. A summary
+    that reaches the cap is cut off, so leave headroom for the sections the prompt asks for.
+    When `None`, the prompt asks for a concise summary but nothing caps the call.
+    """
+
     event_stream_handler: EventStreamHandler[object] | None = field(default=None, kw_only=True)
     """If set, this handler is passed to the nested summary run, so the summarizer's own
     model-streaming events surface to the caller.
@@ -1081,6 +1092,9 @@ async def write_summary(
     if any(is_harness_data(part) for msg in messages if isinstance(msg, ModelRequest) for part in msg.parts):
         prompt = f'{prompt}\n\n{_HARNESS_DATA_INSTRUCTION}'
 
+    if summarizer.max_summary_tokens is not None:
+        prompt = f'{prompt}\n\nKeep the summary under {summarizer.max_summary_tokens} tokens.'
+
     if previous_summary is not None:
         prompt = (
             f'{prompt}\n\n{_INCREMENTAL_UPDATE_INSTRUCTION}\n\n'
@@ -1106,6 +1120,10 @@ async def write_summary(
             f'{ctx.model.model_name!r}, which cannot produce text. Set `model=` on SummarizingCompaction '
             'to a language model to summarize with.'
         )
+    model_settings = summarizer.model_settings
+    if summarizer.max_summary_tokens is not None:
+        model_settings = (model_settings or ModelSettings()).copy()
+        model_settings['max_tokens'] = summarizer.max_summary_tokens
     # `isinstance` narrows the generic `Model` to `Model[Unknown]`; `cast` recovers
     # `Model[Any]`, mirroring core's own `reinject_system_prompt` idiom.
     agent: Agent[None, str] = Agent(
@@ -1114,7 +1132,7 @@ async def write_summary(
         deps_type=type(None),
         output_type=TextOutput(_non_empty_summary),
         instructions=summarizer.instructions,
-        model_settings=summarizer.model_settings,
+        model_settings=model_settings,
         capabilities=list(summarizer.summarization_capabilities),
     )
     result = await agent.run(

@@ -1178,6 +1178,45 @@ class TestCompaction:
         assert summary_settings == original_summary_settings
         assert model_defaults == original_model_defaults
 
+    async def test_max_summary_tokens_is_stated_in_the_prompt_and_caps_the_call(self, anyio_backend: str):
+        if anyio_backend != 'asyncio':  # pragma: no cover -- only asyncio runs here
+            pytest.skip('pydantic-ai Agent execution uses asyncio')
+        observed: list[tuple[str, ModelSettings | None]] = []
+
+        def summarize(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            observed.append((_request_texts(messages)[-1], info.model_settings))
+            return ModelResponse(parts=[TextPart(content='A summary.')])
+
+        comp = SummarizingCompaction(
+            model=FunctionModel(summarize),
+            model_settings=ModelSettings(temperature=0.5, max_tokens=4_096),
+            max_summary_tokens=300,
+            max_messages=1,
+            keep_messages=1,
+        )
+        await comp.compact([_user('first'), _assistant('response'), _user('latest')], _make_ctx())
+
+        [(prompt, settings)] = observed
+        assert 'Be concise' in prompt
+        assert prompt.endswith('Keep the summary under 300 tokens.')
+        assert settings == ModelSettings(temperature=0.5, max_tokens=300)
+
+    async def test_summary_call_is_uncapped_by_default(self, anyio_backend: str):
+        if anyio_backend != 'asyncio':  # pragma: no cover -- only asyncio runs here
+            pytest.skip('pydantic-ai Agent execution uses asyncio')
+        observed: list[tuple[str, ModelSettings | None]] = []
+
+        def summarize(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            observed.append((_request_texts(messages)[-1], info.model_settings))
+            return ModelResponse(parts=[TextPart(content='A summary.')])
+
+        comp = SummarizingCompaction(model=FunctionModel(summarize), max_messages=1, keep_messages=1)
+        await comp.compact([_user('first'), _assistant('response'), _user('latest')], _make_ctx())
+
+        [(prompt, settings)] = observed
+        assert 'tokens.' not in prompt.rsplit('\n', 1)[-1]
+        assert settings is None or 'max_tokens' not in settings
+
     async def test_compaction_replaces_old_messages(self):
         comp = SummarizingCompaction(model='test:m', max_messages=3, keep_messages=1, preserve_first_user_message=False)
         messages: list[ModelMessage] = [
